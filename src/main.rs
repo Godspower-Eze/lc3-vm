@@ -62,7 +62,21 @@ fn main() {
         let op = instruction >> 12;
         match op {
             x if x == InstructionSet::ADD as u16 => {
-                
+                let dest_reg = (instruction >> 9) & 0x7; // destination register
+                let op_1 = (instruction >> 6) & 0x7;
+                let immediate_mode = if (instruction >> 5) & 0x1 == 1 { true } else { false };
+                if !immediate_mode {
+                    let op_2 = instruction & 0x7;
+                    registers[dest_reg as usize] = registers[op_1 as usize].wrapping_add(registers[op_2 as usize]);
+                } else {
+                    let imm5 = instruction & 0x1F;
+                    let imm5_sext = if (imm5 >> 4) & 0x1 == 1 {
+                        imm5 | 0xFFE0
+                    } else {
+                        imm5
+                    };
+                    registers[dest_reg as usize] = registers[op_1 as usize].wrapping_add(imm5_sext);
+                }
             }
             _ => {  }
 
