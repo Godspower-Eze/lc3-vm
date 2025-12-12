@@ -1,4 +1,4 @@
-use std::{io::{self, Read}, usize};
+use std::{env, fs::File, io::{self, Read}, usize};
 
 const MEMORY_SIZE: usize = 1 << 16;
 
@@ -74,13 +74,27 @@ fn update_flags(addr: u16, registers: &mut [u16]) {
     }
 }
 
-fn main() {
-    let mut memory: [u16; MEMORY_SIZE] = [0; MEMORY_SIZE];
-    let mut registers: [u16; REGISTER::COUNT as usize] = [0; REGISTER::COUNT as usize];
+fn get_instructions(file_path: &str) -> io::Result<Vec<u16>> {
+    let mut file = File::open(file_path)?;
+    
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
 
+    // Must be an even number of bytes
+    assert!(buf.len() % 2 == 0);
+
+    let mut words = Vec::new();
+    for chunk in buf.chunks_exact(2) {
+        let word = u16::from_be_bytes([chunk[0], chunk[1]]);
+        words.push(word);
+    }
+    return Ok(words);
+}
+
+fn run_program(memory: &mut [u16]) {
+    let mut registers: [u16; REGISTER::COUNT as usize] = [0; REGISTER::COUNT as usize];
     /* since exactly one condition flag should be set at any given time, set the Z flag */
     registers[REGISTER::COND as usize] = ConditionFlags::ZRO as u16;
-
     /* set the PC to starting position */
     registers[REGISTER::PC as usize] = PC_START;
 
@@ -106,12 +120,14 @@ fn main() {
                     registers[dest_reg as usize] = registers[operand_1_reg as usize].wrapping_add(imm5_sext);
                 }
                 update_flags(dest_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::ST as u16 => {
                 let src_reg = (instruction >> 9) & 0x7;
                 let pc_offset = instruction & 0x1FF;
                 let pc_offset_sext = sign_extend(pc_offset, 9);
                 memory[((registers[REGISTER::PC as usize]).wrapping_add(pc_offset_sext)) as usize] = registers[src_reg as usize];
+                break;
             }
             x if x == InstructionSet::JSR as u16 => {
                 registers[REGISTER::R7 as usize] = registers[REGISTER::PC as usize];
@@ -123,6 +139,7 @@ fn main() {
                     let pc_offset_sext = sign_extend(pc_offset, 11);
                     registers[REGISTER::PC as usize] = registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext);
                 }
+                break;
             }
             x if x == InstructionSet::AND as u16 => {
                 let dest_reg = (instruction >> 9) & 0x7;
@@ -136,65 +153,77 @@ fn main() {
                     registers[dest_reg as usize] = registers[operand_1_reg as usize] & (imm5_sext);
                 }
                 update_flags(dest_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::LDR as u16 => {
                 let dest_reg = (instruction >> 9) & 0x7;
                 let base_reg = (instruction >> 6) & 0x7;
                 let offset_6 = instruction & 0x3F;
                 let offset_6_sext = sign_extend(offset_6, 6);
-                registers[dest_reg as usize] = registers[(registers[base_reg as usize].wrapping_add(offset_6_sext)) as usize];
+                registers[dest_reg as usize] = memory[(registers[base_reg as usize].wrapping_add(offset_6_sext)) as usize];
                 update_flags(dest_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::LD as u16 => {
                 let dest_reg = (instruction >> 9) & 0x7;
                 let pc_offset = instruction & 0x1FF;
                 let pc_offset_sext = sign_extend(pc_offset, 9);
-                registers[dest_reg as usize] = registers[((REGISTER::PC as u16).wrapping_add(pc_offset_sext)) as usize];
+                registers[dest_reg as usize] = memory[registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext) as usize];
                 update_flags(dest_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::LDI as u16 => {
                 let dest_reg = (instruction >> 9) & 0x7;
                 let pc_offset = instruction & 0x1FF;
                 let pc_offset_sext = sign_extend(pc_offset, 9);
-                registers[dest_reg as usize] = registers[(registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext)) as usize];
+                registers[dest_reg as usize] = memory[memory[registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext) as usize] as usize];
                 update_flags(dest_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::STR as u16 => {
                 let src_reg = (instruction >> 9) & 0x7;
                 let base_reg = (instruction >> 6) & 0x7;
                 let offset_6 = instruction & 0x3F;
                 let offset_6_sext = sign_extend(offset_6, 6);
-                registers[(registers[base_reg as usize].wrapping_add(offset_6_sext)) as usize] = registers[src_reg as usize];
+                memory[(registers[base_reg as usize].wrapping_add(offset_6_sext)) as usize] = registers[src_reg as usize];
+                break;
             }
             x if x == InstructionSet::NOT as u16 => {
                 let dest_reg = (instruction >> 9) & 0x7;
                 let operand_reg = (instruction >> 6) & 0x7;
                 registers[dest_reg as usize] = !registers[operand_reg as usize];
+                update_flags(dest_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::STI as u16 => {
                 let src_reg = (instruction >> 9) & 0x7;
                 let pc_offset = instruction & 0x1FF;
                 let pc_offset_sext = sign_extend(pc_offset, 9);
-                registers[registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext) as usize] = registers[src_reg as usize];
+                memory[memory[(REGISTER::PC as u16).wrapping_add(pc_offset_sext) as usize] as usize] = registers[src_reg as usize];
+                break;
             }
             x if x == InstructionSet::JMP as u16 => {
                 let base_reg = (instruction >> 6) & 0x7;
                 registers[REGISTER::PC as usize] = registers[base_reg as usize];
+                update_flags(base_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::LEA as u16 => {
                 let dest_reg = (instruction >> 9) & 0x7;
                 let pc_offset = instruction & 0x1FF;
                 let pc_offset_sext = sign_extend(pc_offset, 9);
-                registers[dest_reg as usize] = registers[registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext) as usize];
+                registers[dest_reg as usize] = registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext);
                 update_flags(dest_reg, &mut registers);
+                break;
             }
             x if x == InstructionSet::BR as u16 => {
                 let cond_flag = (instruction >> 9) & 0x7;
                 if (cond_flag & registers[REGISTER::COND as usize]) != 0 {
                     let pc_offset = instruction & 0x1FF;
                     let pc_offset_sext = sign_extend(pc_offset, 9);
-                    registers[REGISTER::PC as usize] = registers[registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext) as usize];
+                    registers[REGISTER::PC as usize] = registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext);
                 }
+                break;
             }
             x if x == InstructionSet::TRAP as u16 => {
                 registers[REGISTER::R7 as usize] = registers[REGISTER::PC as usize];
@@ -204,6 +233,7 @@ fn main() {
                         let input_char = io::stdin().bytes().next().unwrap().unwrap();
                         registers[REGISTER::R0 as usize] = input_char.try_into().unwrap();
                         update_flags(REGISTER::R0 as u16, &mut registers);
+                        break;
                     }
                     x if x == TrapCodes::HALT as u16 => {
                         println!("HALTS");
@@ -215,25 +245,28 @@ fn main() {
                         println!("{}", input_char as char);
                         registers[REGISTER::R0 as usize] = input_char.try_into().unwrap();
                         update_flags(REGISTER::R0 as u16, &mut registers);
+                        break;
                     }
                     x if x == TrapCodes::OUT as u16 => {
                         let character: u8 = (registers[REGISTER::R0 as usize] & 0xFF).try_into().unwrap();
                         println!("{}", character as char);
+                        break;
                     }
                     x if x == TrapCodes::PUTS as u16 => {
                         let mut starting_addr = registers[REGISTER::R0 as usize];
                         let mut word: String = String::new();
-                        while (memory[starting_addr as usize] != 0) {
+                        while memory[starting_addr as usize] != 0 {
                             let character: u8 = (memory[starting_addr as usize] & 0xFF).try_into().unwrap();
                             word.push(character.try_into().unwrap());
                             starting_addr += 1;
                         }
                         println!("{}", word);
+                        break;
                     }
                     x if x == TrapCodes::PUTSP as u16 => {
                         let mut starting_addr = registers[REGISTER::R0 as usize];
                         let mut word: String = String::new();
-                        while (memory[starting_addr as usize] != 0) {
+                        while memory[starting_addr as usize] != 0 {
                             let char_1: u8 = (memory[starting_addr as usize] & 0xFF).try_into().unwrap();
                             let char_2: u8 = (memory[starting_addr as usize] >> 8).try_into().unwrap();
                             word.push(char_1.try_into().unwrap());
@@ -243,6 +276,7 @@ fn main() {
                             starting_addr += 1;
                         }
                         println!("{}", word);
+                        break;
                     }
                     _ => {
                           
@@ -256,4 +290,19 @@ fn main() {
 
         }
     }
+}
+
+fn main() {
+    // Get program from file in terminal
+    let args: Vec<String> = env::args().collect();
+    let file_path = &args[1];
+    // Process file and get instruction
+    let instructions = get_instructions(&file_path).unwrap();
+    // Load to memory
+    let mut memory: [u16; MEMORY_SIZE] = [0; MEMORY_SIZE];
+    let origin = instructions[0];
+    for (i, instruction) in instructions.iter().enumerate() {
+        memory[(origin as usize + i) as usize] = *instruction;
+    }
+    run_program(&mut memory);
 }
