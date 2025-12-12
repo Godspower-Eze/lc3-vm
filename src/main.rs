@@ -1,4 +1,4 @@
-use std::usize;
+use std::{io::{self, Read}, usize};
 
 const MEMORY_SIZE: usize = 1 << 16;
 
@@ -194,6 +194,59 @@ fn main() {
                     let pc_offset = instruction & 0x1FF;
                     let pc_offset_sext = sign_extend(pc_offset, 9);
                     registers[REGISTER::PC as usize] = registers[registers[REGISTER::PC as usize].wrapping_add(pc_offset_sext) as usize];
+                }
+            }
+            x if x == InstructionSet::TRAP as u16 => {
+                registers[REGISTER::R7 as usize] = registers[REGISTER::PC as usize];
+                let trap_code = instruction & 0xFF;
+                match trap_code {
+                    x if x == TrapCodes::GETC as u16 => {
+                        let input_char = io::stdin().bytes().next().unwrap().unwrap();
+                        registers[REGISTER::R0 as usize] = input_char.try_into().unwrap();
+                        update_flags(REGISTER::R0 as u16, &mut registers);
+                    }
+                    x if x == TrapCodes::HALT as u16 => {
+                        println!("HALTS");
+                        running = false;
+                    }
+                    x if x == TrapCodes::IN as u16 => {
+                        println!("Enter a character: ");
+                        let input_char = io::stdin().bytes().next().unwrap().unwrap();
+                        println!("{}", input_char as char);
+                        registers[REGISTER::R0 as usize] = input_char.try_into().unwrap();
+                        update_flags(REGISTER::R0 as u16, &mut registers);
+                    }
+                    x if x == TrapCodes::OUT as u16 => {
+                        let character: u8 = (registers[REGISTER::R0 as usize] & 0xFF).try_into().unwrap();
+                        println!("{}", character as char);
+                    }
+                    x if x == TrapCodes::PUTS as u16 => {
+                        let mut starting_addr = registers[REGISTER::R0 as usize];
+                        let mut word: String = String::new();
+                        while (memory[starting_addr as usize] != 0) {
+                            let character: u8 = (memory[starting_addr as usize] & 0xFF).try_into().unwrap();
+                            word.push(character.try_into().unwrap());
+                            starting_addr += 1;
+                        }
+                        println!("{}", word);
+                    }
+                    x if x == TrapCodes::PUTSP as u16 => {
+                        let mut starting_addr = registers[REGISTER::R0 as usize];
+                        let mut word: String = String::new();
+                        while (memory[starting_addr as usize] != 0) {
+                            let char_1: u8 = (memory[starting_addr as usize] & 0xFF).try_into().unwrap();
+                            let char_2: u8 = (memory[starting_addr as usize] >> 8).try_into().unwrap();
+                            word.push(char_1.try_into().unwrap());
+                            if char_2 != 0 {
+                                word.push(char_2.try_into().unwrap());
+                            }
+                            starting_addr += 1;
+                        }
+                        println!("{}", word);
+                    }
+                    _ => {
+                          
+                    }
                 }
             }
             x if (x == InstructionSet::RES as u16) | (x == InstructionSet::RTI as u16) => {

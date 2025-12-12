@@ -17,4 +17,4 @@ A Rust implementation of the LC-3 virtual machine, an educational computer archi
 - [x] JMP
 - [ ] RES
 - [x] LEA
-- [ ] TRAP
+- [x] TRAP
