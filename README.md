@@ -4,7 +4,9 @@ A Rust implementation of the LC-3 virtual machine, an educational computer archi
 
 ### How to Use
 
-`cargo run -- 'path_to_binary'`
+```shell
+cargo run -- 'path_to_binary'
+```
 
 ### OP Codes
 - [x] ADD
